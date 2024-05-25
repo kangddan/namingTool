@@ -89,6 +89,8 @@ class NamingToolUI(QtWidgets.QDialog):
     def createWidgets(self):
         self.prefixLabel = QtWidgets.QLabel('Prefix')
         self.prefixLineedit = QtWidgets.QLineEdit()
+        regex = QtCore.QRegExp('^[a-zA-Z_][a-zA-Z0-9_]*$')
+        self.prefixLineedit.setValidator(QtGui.QRegExpValidator(regex, self.prefixLineedit))
         
         self.suffixLabel = QtWidgets.QLabel('Suffix')
         self.suffixLineedit = QtWidgets.QLineEdit()
@@ -108,6 +110,7 @@ class NamingToolUI(QtWidgets.QDialog):
         
         self.batchLabel = QtWidgets.QLabel('Batch Rename')
         self.batchLineedit = QtWidgets.QLineEdit()
+        self.batchLineedit.setValidator(QtGui.QRegExpValidator(regex, self.batchLineedit))
         
         self.indexPaddingLabel = QtWidgets.QLabel('Index Padding')
         self.indexPaddingSpinBox = QtWidgets.QSpinBox()
