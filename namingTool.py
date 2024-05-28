@@ -1,12 +1,38 @@
 import sys
 import re
+import random
 from maya import cmds
-from maya import OpenMaya as om1
-
+from maya.api import OpenMaya as om2
 from PySide2 import QtWidgets
 from PySide2 import QtCore
 from PySide2 import QtGui
-            
+     
+class MyPushButton(QtWidgets.QPushButton):
+    def __init__(self, parent=None):
+        super(MyPushButton, self).__init__(parent)
+        self.butColor = QtGui.QColor(180, 180, 180)
+        self.length = 0.0
+        self.lineVis = False
+        
+    def paintEvent(self, event):
+        super(MyPushButton, self).paintEvent(event)
+        
+        if self.lineVis:
+            painter = QtGui.QPainter(self)
+            pen = QtGui.QPen(self.butColor)
+            pen.setWidth(6)
+            painter.setPen(pen)
+            painter.drawLine(0, self.height(), self.width() * self.length, self.height())
+        
+    def showLine(self, value, length):
+        self.lineVis = True
+        self.length = value / length
+        self.update()
+        
+    def hideLine(self):
+        self.lineVis = False
+        self.update()
+
 class Utils(object):
     @classmethod
     def mayaMainWindow(cls):
@@ -33,27 +59,25 @@ class Utils(object):
         while cmds.objExists(newName):
             startIndex += 1
             newName = name + suffixFormat.format(startIndex)
-        
         return newName
-        
+    
+    @classmethod    
+    def getSelection(cls):
+        sel = om2.MGlobal.getActiveSelectionList()
+        return [sel.getDagPath(i) 
+                if sel.getDependNode(i).hasFn(om2.MFn.kDagNode) 
+                else om2.MFnDependencyNode(sel.getDependNode(i)) 
+                for i in range(sel.length())]
+                
     @classmethod
-    def getNodeName(cls, selectionList, index):
-        
-        mObject = om1.MObject()
-        selectionList.getDependNode(index, mObject)
-
-        if mObject.hasFn(om1.MFn.kDagNode):
-            dagNode = om1.MDagPath.getAPathTo(mObject)
-            longName = dagNode.fullPathName()
-            baseName = longName.split('|')[-1].split(':')[-1]
-            return longName, baseName
-
+    def getNodeLongName(cls, obj):
+        if isinstance(obj, om2.MFnDependencyNode):
+            name = obj.name()
+            return name, name
         else:
-            depNode = om1.MFnDependencyNode(mObject)
-            longName = baseName = depNode.uniqueName()
-            return longName, baseName
+            longName = obj.fullPathName()
+            return longName.split('|')[-1], longName
             
-
 class NamingToolUI(QtWidgets.QDialog):
     NAMINGTOOLIINSTANCE = None 
     @classmethod
@@ -63,28 +87,24 @@ class NamingToolUI(QtWidgets.QDialog):
         
         if cls.NAMINGTOOLIINSTANCE.isHidden(): 
             cls.NAMINGTOOLIINSTANCE.show() 
-            
         else:
+            if cls.NAMINGTOOLIINSTANCE.isMinimized():
+                cls.NAMINGTOOLIINSTANCE.showNormal()
             cls.NAMINGTOOLIINSTANCE.raise_() 
             cls.NAMINGTOOLIINSTANCE.activateWindow() 
             
-    
     def __init__(self, parent=Utils.mayaMainWindow()):
         super(self.__class__, self).__init__(parent)
         self.geometry = None
         self.setWindowTitle('Naming Tool')
+        self.setWindowFlags(QtCore.Qt.WindowType.Window)
         self.setFocusPolicy(QtCore.Qt.StrongFocus); self.setFocus()
         if not sys.version_info.major >= 3:
             self.setWindowFlags(self.windowFlags() ^ QtCore.Qt.WindowContextHelpButtonHint)
 
-        self.createActions()
         self.createWidgets()
         self.createLayouts()
         self.createConnections()
-        
-     
-    def createActions(self):
-        pass
 
     def createWidgets(self):
         self.prefixLabel = QtWidgets.QLabel('Prefix')
@@ -102,7 +122,7 @@ class NamingToolUI(QtWidgets.QDialog):
         self.withLineedit = QtWidgets.QLineEdit()
         
         self.matchCaseSwitch = QtWidgets.QCheckBox('Match Case')
-        self.okBut = QtWidgets.QPushButton('Replace Name!')
+        self.okBut = MyPushButton('Replace Name!')
         
         self.line = QtWidgets.QFrame()
         self.line.setFrameShape(QtWidgets.QFrame.HLine)
@@ -151,42 +171,42 @@ class NamingToolUI(QtWidgets.QDialog):
         subLayout2.addWidget(self.indexStartSpinBox, 2, 1)
         mainLayout.addLayout(subLayout2)
         
-        
         mainLayout.addWidget(self.okBut)
         mainLayout.addStretch()
         
-
     def createConnections(self):
         self.okBut.clicked.connect(self.updateName)
         
     @Utils.addUndo  
     def updateName(self):
-        prefixStr = self.prefixLineedit.text()
-        suffixStr = self.suffixLineedit.text()
-        replaceStr = self.replaceLineedit.text()
-        withStr = self.withLineedit.text()
-        switch = self.matchCaseSwitch.isChecked()
-        bName = self.batchLineedit.text()
+        prefixStr    = self.prefixLineedit.text()
+        suffixStr    = self.suffixLineedit.text()
+        replaceStr   = self.replaceLineedit.text()
+        withStr      = self.withLineedit.text()
+        switch       = self.matchCaseSwitch.isChecked()
+        bName        = self.batchLineedit.text()
         paddingWidth = self.indexPaddingSpinBox.value()
-        startIndex = self.indexStartSpinBox.value()
-        self.replaceName(prefixStr, suffixStr, replaceStr, withStr, switch, bName, paddingWidth, startIndex)
-        
-      
-    def replaceName(self, prefix='', suffix='', replace='', with_='', case_sensitive=True, bName='', paddingWidth=0, startIndex=1):
+        startIndex   = self.indexStartSpinBox.value()
+        self.replaceName(prefixStr, suffixStr, replaceStr, withStr, 
+                         switch, bName, paddingWidth, startIndex)
+   
+    def replaceName(self, prefix='', suffix='', replace='', with_='', 
+                    case_sensitive=True, bName='', paddingWidth=0, startIndex=1):
 
-        selectionList = om1.MSelectionList()
-        om1.MGlobal.getActiveSelectionList(selectionList)
+        sel = Utils.getSelection()
+        if not sel: return
+        updateInterval = max(100, len(sel) // 100)
         
-        if not selectionList.length():
-            return
-
-        for i in range(selectionList.length()):
-            
-            longName, baseName = Utils.getNodeName(selectionList, i)
+        for index, node in enumerate(sel):
+    
+            if random.randint(1, updateInterval) == 18:
+                self.okBut.showLine(index, len(sel))
+                QtWidgets.QApplication.processEvents()
                 
+            baseName, longName = Utils.getNodeLongName(node)
             
             if prefix or suffix:
-                baseName = prefix + baseName + suffix
+                baseName = '{}{}{}'.format(prefix, baseName, suffix)
             
             if replace:
    
@@ -202,21 +222,19 @@ class NamingToolUI(QtWidgets.QDialog):
             try:
                 isLocked = cmds.lockNode(longName, q=True, l=True)[0]
                 if isLocked: cmds.lockNode(longName, l=False)
-                
                 newName = cmds.rename(longName, baseName)
-                
-                if isLocked: cmds.lockNode(newName, l=True)
-                
+                if isLocked: cmds.lockNode(newName, l=True)    
             except:
-                om1.MGlobal.displayWarning('New name has no legal characters')
+                om2.MGlobal.displayWarning('New name has no legal characters')
                 
+
+        self.okBut.hideLine()
+                  
     def showEvent(self, event):
-    
         if self.geometry:
             self.restoreGeometry(self.geometry) 
             
     def closeEvent(self, event):
-  
         if isinstance(self, NamingToolUI):
             super(NamingToolUI, self).closeEvent(event)
             self.geometry = self.saveGeometry()
